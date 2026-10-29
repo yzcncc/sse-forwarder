@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSE 转发器 · Dashboard</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+  --fg:#e6edf3; --dim:#8b949e; --faint:#6e7681;
+  --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 var(--sans)}
+a{color:var(--acc)}
+
+/* ---------- 顶栏 ---------- */
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:8px 14px;
+  background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+header h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.3px}
+.pill{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:2px 10px;
+  font-size:11.5px;color:var(--dim);white-space:nowrap}
+.pill b{color:var(--fg);font-weight:600}
+.pill.ok b{color:var(--ok)} .pill.err b{color:var(--err)} .pill.warn b{color:var(--warn)}
+
+/* ---------- 布局 ---------- */
+main{display:grid;grid-template-columns:300px 320px 1fr;gap:1px;background:var(--line);height:calc(100vh - 45px)}
+section{background:var(--bg);overflow:auto;min-height:0;display:flex;flex-direction:column}
+.phead{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);
+  padding:7px 10px;font-size:12px;font-weight:600;display:flex;justify-content:space-between;
+  align-items:center;gap:8px;z-index:5}
+.phead .sub{font-weight:400;color:var(--dim);font-size:11px}
+@media(max-width:1180px){
+  main{grid-template-columns:1fr 1fr;height:auto}
+  #right{grid-column:1/-1}
+  section{max-height:70vh}
+}
+
+/* ---------- 控件 ---------- */
+button{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:5px;
+  padding:3px 9px;font-size:11.5px;cursor:pointer;font-family:var(--sans)}
+button:hover{border-color:var(--acc);color:var(--acc)}
+button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+button.primary:hover{background:#388bfd;color:#fff}
+button.danger:hover{border-color:var(--err);color:var(--err)}
+button.solid-danger{background:#b62324;border-color:#b62324;color:#fff}
+button.solid-danger:hover{background:#ea4a4b;color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,textarea,select{background:#0b0f14;border:1px solid var(--line);color:var(--fg);
+  border-radius:5px;padding:4px 7px;font-size:12px;font-family:var(--mono);width:100%}
+textarea{resize:vertical}
+label{font-size:11px;color:var(--dim);display:block;margin:6px 0 2px}
+.form{padding:8px 10px;border-bottom:1px solid var(--line)}
+.form h4{margin:0;font-size:11.5px;color:var(--acc);font-weight:600}
+.form .desc{font-size:10.5px;color:var(--dim);margin:2px 0 5px}
+.btnrow{display:flex;gap:6px;margin-top:8px;align-items:center}
+
+/* ---------- 上游列表 ---------- */
+.up{padding:8px 10px;border-bottom:1px solid var(--line)}
+.up.active{background:#12233b;box-shadow:inset 3px 0 0 var(--acc)}
+.up .n{font-weight:600;display:flex;justify-content:space-between;gap:6px;align-items:center}
+.up .u{color:var(--dim);font-family:var(--mono);font-size:11px;word-break:break-all;margin-top:2px}
+.up .acts{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+.badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+.badge.on{background:#12331f;border-color:#1f6f3a;color:var(--ok)}
+.rwline{color:var(--faint)} .rwline.has{color:var(--warn)}
+
+/* ---------- 会话列表 ---------- */
+.sess{padding:7px 10px;border-bottom:1px solid var(--line);font-size:12px}
+.sess:hover{background:var(--panel)} .sess.sel{background:#12233b;box-shadow:inset 3px 0 0 var(--acc)}
+.sess .l1{display:flex;gap:6px;align-items:center}
+.m{font-family:var(--mono);font-weight:700;font-size:10.5px;padding:1px 5px;border-radius:3px;
+  background:var(--panel2);border:1px solid var(--line)}
+.m.GET{color:var(--ok)} .m.POST{color:var(--acc)} .m.DELETE{color:var(--err)}
+.st{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+.st.streaming{background:var(--ok);box-shadow:0 0 6px var(--ok);animation:pulse 1.4s infinite}
+.st.connecting{background:var(--warn)} .st.error{background:var(--err)} .st.done{background:#4a5568}
+@keyframes pulse{50%{opacity:.35}}
+.sess .p{font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.sess .l2{color:var(--dim);font-size:10.5px;display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.sc{color:var(--ok)} .sc.bad{color:var(--err)}
+
+/* ---------- 详情区 ---------- */
+.toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 10px;
+  border-bottom:1px solid var(--line);background:var(--panel)}
+.toolbar label{margin:0;display:flex;align-items:center;gap:4px;color:var(--dim);font-size:11px}
+.toolbar input[type=checkbox]{width:auto}
+.tabs{display:flex;gap:2px;padding:0 8px;background:var(--panel);border-bottom:1px solid var(--line)}
+.tab{padding:6px 12px;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;
+  cursor:pointer;font-size:12px;color:var(--dim)}
+.tab.on{background:var(--bg);border-color:var(--line);color:var(--fg);font-weight:600}
+.tab .cnt{font-size:10px;background:var(--err);color:#fff;border-radius:999px;padding:0 5px;margin-left:4px}
+.body{padding:10px 12px;flex:1;overflow:auto}
+.kv{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px}
+.kv td{padding:3px 6px;border-bottom:1px solid #1b2230;vertical-align:top;word-break:break-all}
+.kv td:first-child{color:var(--acc);white-space:nowrap;width:1%;padding-right:12px}
+pre.block{background:#0b0f14;border:1px solid var(--line);border-radius:5px;padding:8px;
+  max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-all;
+  font-family:var(--mono);font-size:11.5px;margin:4px 0}
+
+/* 分片 */
+.chunk{border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:var(--panel);overflow:hidden}
+.chunk .ch{display:flex;gap:10px;flex-wrap:wrap;padding:4px 8px;background:var(--panel2);
+  font-size:10.5px;color:var(--dim);font-family:var(--mono);align-items:center}
+.chunk .ch b{color:var(--fg)}
+.chunk pre{margin:0;padding:7px 9px;font-family:var(--mono);font-size:11.5px;
+  white-space:pre-wrap;word-break:break-all;max-height:340px;overflow:auto}
+.chunk.hex pre{color:#a5d6ff}
+.chunk .tog{margin-left:auto;color:var(--acc);cursor:pointer;user-select:none}
+.chunk.rw .ch{background:#231d10}
+
+/* 错误 */
+.errbox{border:1px solid #5c2323;background:#231314;border-radius:6px;padding:8px 10px;margin-bottom:8px}
+.errbox .t{color:var(--err);font-weight:700;font-size:12.5px}
+.errbox .msg{font-family:var(--mono);font-size:11.5px;margin:4px 0;white-space:pre-wrap;word-break:break-all}
+.errbox .meta{color:var(--dim);font-size:11px;display:flex;gap:10px;flex-wrap:wrap}
+.errbox pre{background:#0b0f14;border:1px solid var(--line);border-radius:5px;padding:7px;font-size:11px;
+  max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-all;color:#ffb4ab}
+.errbox.nonfatal{border-color:#5c4a1f;background:#231d10}
+.errbox.nonfatal .t{color:var(--warn)}
+details summary{cursor:pointer;color:var(--acc);font-size:11.5px;margin:4px 0}
+
+/* 分析 / 改写 */
+.analysis{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;
+  margin-bottom:10px;font-size:11.5px}
+.analysis .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.analysis .tag{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 7px;
+  font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.analysis .tag.bad{border-color:#5c4a1f;color:var(--warn)}
+.rw-tbl{width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--mono)}
+.rw-tbl th,.rw-tbl td{border-bottom:1px solid #1b2230;padding:4px 6px;text-align:left;
+  word-break:break-all;vertical-align:top}
+.rw-tbl th{color:var(--dim);font-weight:500}
+.rw-tbl td.n{color:var(--warn);text-align:right;white-space:nowrap}
+.arrow{color:var(--ok)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+h4.sec{margin:14px 0 6px;font-size:12px}
+
+.hint{color:var(--dim);font-size:11.5px;padding:14px;text-align:center}
+
+/* ---------- 模态框 ---------- */
+#mask{position:fixed;inset:0;background:#000a;display:none;align-items:flex-start;
+  justify-content:center;z-index:50;padding:40px 12px;overflow:auto}
+#mask.on{display:flex}
+.modal{display:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:14px;width:100%;max-width:820px;box-shadow:0 12px 40px #000c}
+.modal.show{display:block}
+.modal h3{margin:0 0 4px;font-size:14px}
+.modal .tip{color:var(--dim);font-size:11.5px;margin-bottom:10px;line-height:1.6}
+.mfoot{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.rrow{display:grid;grid-template-columns:90px 1fr 1fr 92px 30px 22px;gap:5px;margin-bottom:5px;align-items:center}
+.rrow input,.rrow select{font-size:11px;padding:3px 5px}
+.rrow input[type=checkbox]{width:auto}
+.rhead{display:grid;grid-template-columns:90px 1fr 1fr 92px 30px 22px;gap:5px;
+  color:var(--dim);font-size:10.5px}
+.rhead label{margin:0;display:flex;justify-content:center}
+.probe-step{display:grid;grid-template-columns:60px 40px 70px 1fr;gap:8px;padding:5px 0;
+  border-bottom:1px solid #1b2230;font-family:var(--mono);font-size:11.5px;align-items:baseline}
+.probe-step .ok{color:var(--ok)} .probe-step .no{color:var(--err)}
+.probe-step .d{word-break:break-all;white-space:pre-wrap;color:var(--dim)}
+
+/* ---------- toast ---------- */
+#toast{position:fixed;right:14px;bottom:14px;display:flex;flex-direction:column;gap:6px;z-index:99}
+.toast{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--acc);
+  border-radius:5px;padding:7px 11px;font-size:12px;max-width:460px;box-shadow:0 4px 14px #0008}
+.toast.err{border-left-color:var(--err)} .toast.ok{border-left-color:var(--ok)}
+.toast pre{font-family:var(--mono);font-size:11px;white-space:pre-wrap;margin:4px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>SSE 转发器 Dashboard</h1>
+  <span class="pill">代理 <b id="hProxy">-</b></span>
+  <span class="pill">当前上游 <b id="hUp">-</b></span>
+  <span class="pill">会话 <b id="hSess">0</b></span>
+  <span class="pill">进行中 <b id="hOpen">0</b></span>
+  <span class="pill">累计 <b id="hBytes">0 B</b></span>
+  <span class="pill warn" id="hRewPill">改写 <b id="hRew">-</b></span>
+  <span class="pill err" id="hErrPill" hidden>错误 <b id="hErr">0</b></span>
+  <span class="pill" id="hConn">实时流 <b>连接中…</b></span>
+</header>
+
+<main>
+  <!-- 上游 -->
+  <section id="left">
+    <div class="phead"><span>上游 Upstream</span><span class="sub">点击卡片切换，立即生效</span></div>
+    <div class="form">
+      <label>名称</label><input id="uName" placeholder="例如 本地 mock / 生产网关">
+      <label>URL</label><input id="uUrl" placeholder="http://host:port/path">
+      <label>附加请求头（JSON 对象，可空）</label><textarea id="uHeaders" rows="2" placeholder='{"Authorization":"Bearer xxx"}'></textarea>
+      <div style="border-top:1px solid var(--line);margin:9px 0 2px;padding-top:6px">
+        <h4>改写规则（本地 ⇄ 上游）</h4>
+        <div class="desc">请求方向：本地值 → 上游值；响应方向自动反向。字面全文替换。</div>
+        <label>本地 API Key（客户端用的 sk-…）</label><input id="uSrcKey" placeholder="sk-local-xxxxxxxx">
+        <label>上游 API Key（上游要求的 sk-…）</label><input id="uDstKey" placeholder="sk-upstream-yyyyyyyy">
+        <label>本地模型名</label><input id="uSrcModel" placeholder="local-qwen3-max-thinking">
+        <label>上游模型名</label><input id="uDstModel" placeholder="qwen-max-upstream-v3">
+      </div>
+      <label>备注</label><input id="uNote" placeholder="可选">
+      <div class="btnrow">
+        <button class="primary" id="btnAdd" style="flex:1">添加并激活</button>
+        <button id="btnAddOnly">仅添加</button>
+      </div>
+      <div class="btnrow">
+        <button id="btnKillAll" class="danger" style="flex:1">断开所有进行中的流</button>
+      </div>
+    </div>
+    <div id="upList"></div>
+  </section>
+
+  <!-- 会话 -->
+  <section id="mid">
+    <div class="phead"><span>会话 Sessions</span>
+      <span style="display:flex;gap:5px">
+        <button id="btnOnlyOpen">只看进行中</button>
+        <button id="btnClear" class="danger">清历史</button>
+      </span>
+    </div>
+    <div id="sessList"><div class="hint">等待客户端请求代理端口…</div></div>
+  </section>
+
+  <!-- 详情 -->
+  <section id="right">
+    <div class="phead"><span id="dTitle">详情</span>
+      <span style="display:flex;gap:5px">
+        <button id="btnKill" class="danger" disabled>终止此会话</button>
+        <button id="btnRefresh">刷新</button>
+      </span>
+    </div>
+    <div class="toolbar">
+      <label><input type="checkbox" id="ckAuto" checked>自动滚动</label>
+      <label><input type="checkbox" id="ckPause">暂停渲染</label>
+      <label><input type="checkbox" id="ckHex">HEX 视图</label>
+      <label><input type="checkbox" id="ckMerge" checked>合并连续小分片</label>
+      <span class="pill" id="dMeta">未选择会话</span>
+    </div>
+    <div class="tabs" id="tabs">
+      <div class="tab on" data-t="stream">数据流 <span id="cntChunk"></span></div>
+      <div class="tab" data-t="req">请求</div>
+      <div class="tab" data-t="res">响应头</div>
+      <div class="tab" data-t="rw">改写</div>
+      <div class="tab" data-t="err">错误 <span class="cnt" id="cntErr" hidden>0</span></div>
+      <div class="tab" data-t="ov">概览</div>
+    </div>
+    <div class="body" id="detail"><div class="hint">从中间列表选择一个会话，或直接通过代理端口发起请求</div></div>
+  </section>
+</main>
+
+<!-- 模态框 -->
+<div id="mask">
+  <div class="modal" id="mRules">
+    <h3>改写规则 · <span id="mUpName"></span></h3>
+    <div class="tip">一条规则 = 一对值。<b>请求方向</b>把「本地值」字面替换为「上游值」（作用于全部请求头与 body）；
+      <b>响应方向</b>自动反向，把「上游值」换回「本地值」（流式逐块处理，跨分片被截断的值也能正确替换）。
+      纯字面替换、不解析 JSON，最长模式优先。值请填得足够长以避免误替换。</div>
+    <div class="rhead">
+      <span>名称</span><span>本地值（客户端侧）</span><span>上游值（上游侧）</span><span>方向</span>
+      <label title="启用">启</label><span></span>
+    </div>
+    <div id="mRows"></div>
+    <button id="mAddRow" style="margin-top:4px">+ 加一条规则</button>
+    <div class="mfoot">
+      <button id="mCancel">取消</button>
+      <button id="mSave" class="primary">保存规则</button>
+    </div>
+  </div>
+  <div class="modal" id="mEdit" style="max-width:560px">
+    <h3>编辑上游</h3>
+    <label>名称</label><input id="eName" placeholder="例如 本地 mock / 生产网关">
+    <label>URL</label><input id="eUrl" placeholder="http://host:port/path">
+    <label>附加请求头（JSON 对象，可空）</label><textarea id="eHeaders" rows="4" placeholder='{"Authorization":"Bearer xxx"}'></textarea>
+    <label>备注</label><input id="eNote" placeholder="可选">
+    <div class="mfoot">
+      <button id="eCancel">取消</button>
+      <button id="eSave" class="primary">保存</button>
+    </div>
+  </div>
+  <div class="modal" id="mProbe" style="max-width:720px">
+    <h3 id="pTitle">上游探测</h3>
+    <div id="pUrl" class="tip" style="font-family:var(--mono)"></div>
+    <div id="pSteps"></div>
+    <div id="pErr" style="margin-top:8px"></div>
+    <div class="mfoot"><button id="pClose" class="primary">关闭</button></div>
+  </div>
+  <div class="modal" id="mConfirm" style="max-width:440px">
+    <h3 id="cTitle">确认</h3>
+    <div id="cMsg" style="font-size:12.5px;line-height:1.7;margin:8px 0 2px"></div>
+    <div class="mfoot">
+      <button id="cCancel">取消</button>
+      <button id="cOk" class="solid-danger">确认</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ============================================================
+ * 结构：工具 → API 层 → 全局状态 → toast → 模态框 →
+ *       上游面板 → 会话列表 → 详情（6 个页签）→ SSE 实时连接 → 初始化
+ * ============================================================ */
+
+/* ---------------- 工具 ---------------- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtB = n => {
+  if (n == null) return '-';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+};
+function b64ToBytes(b64) {
+  if (!b64) return new Uint8Array(0);
+  const s = atob(b64), u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+const bytesToText = u => new TextDecoder('utf-8', {fatal: false}).decode(u);
+function bytesToHex(u) {
+  const out = [];
+  for (let i = 0; i < u.length; i += 16) {
+    const sl = u.subarray(i, i + 16);
+    const hex = [...sl].map(b => b.toString(16).padStart(2, '0')).join(' ').padEnd(48, ' ');
+    const asc = [...sl].map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.').join('');
+    out.push(String(i).padStart(8, '0') + '  ' + hex + '  |' + asc + '|');
+  }
+  return out.join('\n');
+}
+const fmtDetail = d => typeof d === 'string' ? d : JSON.stringify(d);
+
+/* ---------------- API 层 ---------------- */
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+async function api(path, opt = {}) {
+  const headers = Object.assign({'Content-Type': 'application/json', 'X-Dashboard-Token': TOKEN}, opt.headers || {});
+  const sep = path.includes('?') ? '&' : '?';
+  const url = path + (TOKEN ? sep + 'token=' + encodeURIComponent(TOKEN) : '');
+  const r = await fetch(url, Object.assign({headers}, opt));
+  const t = await r.text();
+  let j;
+  try { j = JSON.parse(t); } catch { j = {ok: false, error: '非 JSON 响应: ' + t.slice(0, 300)}; }
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.message || ('HTTP ' + r.status));
+  return j;
+}
+
+/* ---------------- 全局状态 ---------------- */
+const S = {
+  upstreams: [], active: null, settings: {}, stats: {},
+  sessions: new Map(),          // id -> summary（含实时增量）
+  order: [],                    // 会话出现顺序（旧 → 新）
+  sel: null, tab: 'stream',
+  detail: null,                 // 选中的会话详情（/api/sessions/{id} 的返回）
+  chunks: [],                   // 选中会话的分片 [{meta, bytes}]
+  onlyOpen: false, paused: false,
+  es: null, streamRoot: null,
+};
+const CHUNK_CAP = 2000;          // 内存与 DOM 中保留的分片上限
+
+/* ---------------- toast ---------------- */
+function toast(msg, kind = '', ms) {
+  const box = $('#toast');
+  while (box.children.length >= 5) box.firstChild.remove();
+  const d = document.createElement('div');
+  d.className = 'toast ' + kind;
+  d.textContent = msg;
+  box.appendChild(d);
+  setTimeout(() => d.remove(), ms || (kind === 'err' ? 9000 : 3500));
+}
+function toastHTML(html, kind = '', ms = 12000) {
+  const box = $('#toast');
+  while (box.children.length >= 5) box.firstChild.remove();
+  const d = document.createElement('div');
+  d.className = 'toast ' + kind;
+  d.innerHTML = html;
+  box.appendChild(d);
+  setTimeout(() => d.remove(), ms);
+}
+
+/* ---------------- 模态框 ---------------- */
+function openModal(id) {
+  $$('#mask .modal').forEach(m => m.classList.toggle('show', m.id === id));
+  $('#mask').classList.add('on');
+}
+function closeModal() { $('#mask').classList.remove('on'); }
+$('#mask').addEventListener('click', e => { if (e.target.id === 'mask') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/** 确认弹窗，返回 Promise<boolean>。 */
+function confirmDlg(title, msgHTML, okText = '确认') {
+  return new Promise(resolve => {
+    $('#cTitle').textContent = title;
+    $('#cMsg').innerHTML = msgHTML;
+    $('#cOk').textContent = okText;
+    openModal('mConfirm');
+    const done = v => { $('#cOk').onclick = $('#cCancel').onclick = null; closeModal(); resolve(v); };
+    $('#cOk').onclick = () => done(true);
+    $('#cCancel').onclick = () => done(false);
+  });
+}
+
+/* ---------------- 上游面板 ---------------- */
+async function loadState() {
+  const st = await api('/api/state');
+  S.upstreams = st.upstreams;
+  S.active = st.active_upstream_id;
+  S.settings = st.settings;
+  S.stats = st.stats || {};
+  $('#hProxy').textContent = st.settings.proxy_listen;
+  const act = st.active_upstream;
+  const nr = act && act.rules ? act.rules.filter(r => r.enabled !== false).length : 0;
+  $('#hUp').textContent = act ? act.name : '(未配置)';
+  $('#hRewPill').hidden = !st.settings.rewrite_enabled;
+  $('#hRew').textContent = st.settings.rewrite_enabled ? (nr ? nr + ' 条规则' : '未配置') : '已关闭';
+  $('#hErr').textContent = st.stats.errors || 0;
+  $('#hErrPill').hidden = !(st.stats.errors > 0);
+  $('#hBytes').textContent = fmtB(st.stats.bytes_upstream || 0);
+  renderUps();
+}
+
+function renderUps() {
+  $('#upList').innerHTML = S.upstreams.map(u => {
+    const on = u.id === S.active;
+    const rules = u.rules || [];
+    const hdrs = u.headers && Object.keys(u.headers).length;
+    return `<div class="up ${on ? 'active' : ''}" data-id="${esc(u.id)}">
+      <div class="n"><span>${esc(u.name)}</span>
+        <span class="badge ${on ? 'on' : ''}">${on ? '● 使用中' : '未激活'}</span></div>
+      <div class="u">${esc(u.url)}</div>
+      ${u.note ? `<div class="u" style="color:var(--faint)">备注: ${esc(u.note)}</div>` : ''}
+      ${hdrs ? `<div class="u" style="color:var(--faint)">附加头: ${esc(Object.keys(u.headers).join(', '))}</div>` : ''}
+      <div class="u rwline ${rules.length ? 'has' : ''}">改写规则: ${rules.length
+        ? rules.length + ' 条 · ' + esc(rules.map(r => r.label || (r.src.slice(0, 10) + '…')).join(', '))
+        : '无'}</div>
+      <div class="acts">
+        <button data-a="switch">切换到此</button>
+        <button data-a="switch-kill">切换并断流</button>
+        <button data-a="rules">规则</button>
+        <button data-a="probe">探测</button>
+        <button data-a="edit">编辑</button>
+        <button data-a="del" class="danger">删除</button>
+      </div></div>`;
+  }).join('') || '<div class="hint">还没有上游，先在上方添加一个</div>';
+}
+
+$('#upList').addEventListener('click', async e => {
+  const btn = e.target.closest('button');
+  const box = e.target.closest('.up');
+  if (!btn || !box || btn.disabled) return;
+  const id = box.dataset.id;
+  const u = S.upstreams.find(x => x.id === id);
+  const a = btn.dataset.a;
+  if (a === 'rules') { openRules(id); return; }
+  if (a === 'edit') { openEdit(id); return; }
+  btn.disabled = true;
+  try {
+    if (a === 'switch' || a === 'switch-kill') {
+      const kill = a === 'switch-kill';
+      if (kill && !await confirmDlg('切换并断流',
+        `切换到上游 <b>${esc(u.name)}</b> 并断开所有进行中的旧流？客户端会收到连接关闭并自行重连。`, '切换')) return;
+      const r = await api(`/api/upstreams/${id}/activate`, {method: 'POST', body: JSON.stringify({kill_open: kill})});
+      toast(kill
+        ? `已切换上游 → ${u.name}，并断开 ${r.killed_open_sessions} 条旧流`
+        : `已切换上游 → ${u.name}`, 'ok');
+    }
+    if (a === 'del') {
+      if (!await confirmDlg('删除上游',
+        `确定删除上游 <b>${esc(u.name)}</b>（${esc(u.url)}）？此操作不可撤销。`, '删除')) return;
+      await api('/api/upstreams/' + id, {method: 'DELETE'});
+      toast('已删除 ' + u.name, 'ok');
+    }
+    if (a === 'probe') {
+      toast('探测中…');
+      showProbe(await api(`/api/upstreams/${id}/test`, {method: 'POST', body: '{}'}));
+    }
+    await loadState();
+  } catch (err) {
+    toast('操作失败: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/* 添加上游（含快速 key / 模型规则） */
+function quickRulesFromForm() {
+  const k1 = $('#uSrcKey').value.trim(), k2 = $('#uDstKey').value.trim();
+  const m1 = $('#uSrcModel').value.trim(), m2 = $('#uDstModel').value.trim();
+  if (k1 !== k2 && (!k1 || !k2)) throw new Error('API Key 的本地值与上游值必须成对填写');
+  if (m1 !== m2 && (!m1 || !m2)) throw new Error('模型名的本地值与上游值必须成对填写');
+  const out = [];
+  if (k1 && k2) out.push({label: 'API Key', src: k1, dst: k2, scope: 'both', enabled: true});
+  if (m1 && m2) out.push({label: '模型名', src: m1, dst: m2, scope: 'both', enabled: true});
+  return out;
+}
+async function addUp(activate) {
+  const name = $('#uName').value.trim(), url = $('#uUrl').value.trim();
+  if (!url) return toast('URL 不能为空', 'err');
+  let rules;
+  try { rules = quickRulesFromForm(); } catch (e) { return toast(e.message, 'err'); }
+  let headers = {};
+  const raw = $('#uHeaders').value.trim();
+  if (raw) {
+    try { headers = JSON.parse(raw); } catch (e) { return toast('附加请求头不是合法 JSON: ' + e.message, 'err'); }
+  }
+  try {
+    await api('/api/upstreams', {method: 'POST',
+      body: JSON.stringify({name, url, headers, note: $('#uNote').value.trim(), rules, activate})});
+    ['uName', 'uUrl', 'uHeaders', 'uNote'].forEach(i => $('#' + i).value = '');
+    toast((activate ? '已添加并激活: ' : '已添加: ') + url, 'ok');
+    await loadState();
+  } catch (err) { toast('添加失败: ' + err.message, 'err'); }
+}
+$('#btnAdd').onclick = () => addUp(true);
+$('#btnAddOnly').onclick = () => addUp(false);
+$('#btnKillAll').onclick = async () => {
+  if (!await confirmDlg('断开所有进行中的流',
+    '所有进行中的连接会被立即终止，客户端会收到连接关闭并自行重连到当前上游。', '断开')) return;
+  try {
+    const r = await api('/api/sessions/kill-all', {method: 'POST', body: '{}'});
+    toast('已请求断开 ' + r.killed + ' 条流', 'ok');
+  } catch (err) { toast('操作失败: ' + err.message, 'err'); }
+};
+
+/* ---------------- 规则编辑弹窗 ---------------- */
+const M = {uid: null, rules: []};
+function openRules(uid) {
+  const u = S.upstreams.find(x => x.id === uid);
+  if (!u) return;
+  M.uid = uid;
+  M.rules = JSON.parse(JSON.stringify(u.rules || []));
+  $('#mUpName').textContent = u.name + '  (' + u.url + ')';
+  renderRuleRows();
+  openModal('mRules');
+}
+function renderRuleRows() {
+  $('#mRows').innerHTML = M.rules.map((r, i) => `<div class="rrow" data-i="${i}">
+    <input class="f-label" value="${esc(r.label || '')}" placeholder="API Key">
+    <input class="f-src" value="${esc(r.src || '')}" placeholder="sk-local-…">
+    <input class="f-dst" value="${esc(r.dst || '')}" placeholder="sk-upstream-…">
+    <select class="f-scope">
+      <option value="both" ${r.scope === 'both' ? 'selected' : ''}>双向</option>
+      <option value="request" ${r.scope === 'request' ? 'selected' : ''}>仅请求</option>
+      <option value="response" ${r.scope === 'response' ? 'selected' : ''}>仅响应</option>
+    </select>
+    <input type="checkbox" class="f-enabled" ${r.enabled === false ? '' : 'checked'} title="启用">
+    <button class="f-del danger" title="删除">✕</button></div>`).join('')
+    || '<div class="hint" style="padding:8px">还没有规则，点下面按钮加一条</div>';
+}
+$('#mRows').addEventListener('input', e => {
+  const row = e.target.closest('.rrow');
+  if (!row) return;
+  const r = M.rules[+row.dataset.i];
+  if (e.target.classList.contains('f-enabled')) return;
+  r.label = row.querySelector('.f-label').value;
+  r.src = row.querySelector('.f-src').value;
+  r.dst = row.querySelector('.f-dst').value;
+  r.scope = row.querySelector('.f-scope').value;
+});
+$('#mRows').addEventListener('change', e => {
+  const row = e.target.closest('.rrow');
+  if (row && e.target.classList.contains('f-enabled'))
+    M.rules[+row.dataset.i].enabled = e.target.checked;
+});
+$('#mRows').addEventListener('click', e => {
+  if (!e.target.closest('.f-del')) return;
+  M.rules.splice(+e.target.closest('.rrow').dataset.i, 1);
+  renderRuleRows();
+});
+$('#mAddRow').onclick = () => { M.rules.push({label: '', src: '', dst: '', scope: 'both', enabled: true}); renderRuleRows(); };
+$('#mCancel').onclick = closeModal;
+$('#mSave').onclick = async () => {
+  const rules = M.rules.filter(r => r.src || r.dst);
+  for (const r of rules) {
+    if (!r.src || !r.dst) return toast('每条规则的本地值与上游值都必须填写', 'err');
+    r.enabled = r.enabled !== false;
+  }
+  try {
+    await api('/api/upstreams/' + M.uid, {method: 'PUT', body: JSON.stringify({rules})});
+    closeModal();
+    toast('已保存 ' + rules.length + ' 条规则，对后续请求立即生效', 'ok');
+    await loadState();
+  } catch (err) { toast('保存失败: ' + err.message, 'err'); }
+};
+
+/* ---------------- 编辑上游弹窗 ---------------- */
+const E = {uid: null};
+function openEdit(uid) {
+  const u = S.upstreams.find(x => x.id === uid);
+  if (!u) return;
+  E.uid = uid;
+  $('#eName').value = u.name || '';
+  $('#eUrl').value = u.url || '';
+  $('#eHeaders').value = u.headers && Object.keys(u.headers).length ? JSON.stringify(u.headers, null, 2) : '';
+  $('#eNote').value = u.note || '';
+  openModal('mEdit');
+  $('#eName').focus();
+}
+$('#eCancel').onclick = closeModal;
+$('#eSave').onclick = async () => {
+  const url = $('#eUrl').value.trim(), name = $('#eName').value.trim();
+  if (!url) return toast('URL 不能为空', 'err');
+  let headers = {};
+  const raw = $('#eHeaders').value.trim();
+  if (raw) {
+    try { headers = JSON.parse(raw); } catch (e) { return toast('附加请求头不是合法 JSON: ' + e.message, 'err'); }
+  }
+  try {
+    await api('/api/upstreams/' + E.uid, {method: 'PUT',
+      body: JSON.stringify({url, name, headers, note: $('#eNote').value.trim()})});
+    closeModal();
+    toast('已更新 ' + (name || url), 'ok');
+    await loadState();
+  } catch (err) { toast('保存失败: ' + err.message, 'err'); }
+};
+
+/* ---------------- 探测结果弹窗 ---------------- */
+function showProbe(r) {
+  const rp = r.report || {};
+  const ok = r.ok;
+  $('#pTitle').textContent = (ok ? '上游探测通过' : '上游探测失败');
+  $('#pUrl').textContent = rp.target_url || '';
+  $('#pSteps').innerHTML = (rp.steps || []).map(s => `
+    <div class="probe-step">
+      <span>${s.ok ? '✔' : '✘'} ${esc(s.step)}</span>
+      <span class="${s.ok ? 'ok' : 'no'}">${s.ok ? 'OK' : 'FAIL'}</span>
+      <span>${esc(s.ms)} ms</span>
+      <span class="d">${esc(fmtDetail(s.detail))}</span>
+    </div>`).join('') || '<div class="hint">无探测步骤</div>';
+  $('#pErr').innerHTML = rp.error
+    ? `<div class="errbox"><div class="t">失败原因</div><div class="msg">${esc(rp.error)}</div></div>` : '';
+  openModal('mProbe');
+}
+$('#pClose').onclick = closeModal;
+
+/* ---------------- 会话列表 ---------------- */
+function renderSess() {
+  let ids = [...S.order].reverse();
+  if (S.onlyOpen) ids = ids.filter(i => ['connecting', 'streaming'].includes(S.sessions.get(i)?.state));
+  $('#sessList').innerHTML = ids.slice(0, 200).map(i => sessRowHTML(S.sessions.get(i))).join('')
+    || '<div class="hint">暂无会话</div>';
+  updateHeaderCounts();
+}
+function sessRowHTML(s) {
+  if (!s) return '';
+  const sc = s.status ? (s.status >= 400 ? 'bad' : '') : '';
+  const live = ['connecting', 'streaming'].includes(s.state);
+  return `<div class="sess ${S.sel === s.id ? 'sel' : ''}" data-id="${esc(s.id)}">
+    <div class="l1"><span class="st ${esc(s.state)}"></span><span class="m ${esc(s.method)}">${esc(s.method)}</span>
+      <span class="p">${esc(s.path || '/')}</span><span class="sc ${sc}">${esc(s.status ?? '…')}</span></div>
+    <div class="l2"><span>#${esc(s.short_id)}</span><span>${esc(s.upstream_name || '')}</span>
+      <span>${fmtB(s.bytes_upstream)}</span><span>${s.chunks}块</span>
+      <span>${(s.duration_ms / 1000).toFixed(1)}s</span>
+      ${s.errors > 0 ? `<span style="color:var(--err)">⚠${s.errors}</span>` : ''}
+      ${!live ? `<span>${esc(s.close_reason || s.state)}</span>` : ''}</div>
+  </div>`;
+}
+function updateHeaderCounts() {
+  $('#hSess').textContent = S.sessions.size;
+  $('#hOpen').textContent = [...S.sessions.values()]
+    .filter(s => ['connecting', 'streaming'].includes(s.state)).length;
+}
+/** 轻量补丁：只更新单行，避免每个分片全量重绘列表。 */
+function patchSessRow(id) {
+  const row = $(`#sessList .sess[data-id="${CSS.escape(id)}"]`);
+  if (!row) { renderSess(); return; }
+  const onlyOpenOk = !S.onlyOpen || ['connecting', 'streaming'].includes(S.sessions.get(id)?.state);
+  if (!onlyOpenOk) { renderSess(); return; }
+  row.outerHTML = sessRowHTML(S.sessions.get(id));
+  updateHeaderCounts();
+}
+$('#sessList').addEventListener('click', e => {
+  const b = e.target.closest('.sess');
+  if (b) selectSession(b.dataset.id);
+});
+$('#btnOnlyOpen').onclick = e => {
+  S.onlyOpen = !S.onlyOpen;
+  e.target.textContent = S.onlyOpen ? '看全部' : '只看进行中';
+  renderSess();
+};
+$('#btnClear').onclick = async () => {
+  try {
+    await api('/api/sessions/clear', {method: 'POST', body: '{}'});
+    S.sessions.clear(); S.order = []; renderSess();
+    toast('历史已清空', 'ok');
+  } catch (err) { toast('操作失败: ' + err.message, 'err'); }
+};
+
+/* ---------------- 会话详情 ---------------- */
+$('#tabs').addEventListener('click', e => {
+  const t = e.target.closest('.tab');
+  if (!t) return;
+  $$('#tabs .tab').forEach(x => x.classList.remove('on'));
+  t.classList.add('on');
+  S.tab = t.dataset.t;
+  renderDetail();
+});
+$('#btnKill').onclick = async () => {
+  if (!S.sel) return;
+  try {
+    await api(`/api/sessions/${S.sel}/kill`, {method: 'POST', body: '{}'});
+    toast('已请求终止会话', 'ok');
+  } catch (err) { toast('操作失败: ' + err.message, 'err'); }
+};
+$('#btnRefresh').onclick = () => selectSession(S.sel, true);
+
+async function selectSession(id, force) {
+  if (!id || (S.sel === id && !force)) return;
+  S.sel = id;
+  S.chunks = [];
+  S.detail = null;
+  S.streamRoot = null;
+  renderSess();
+  $('#detail').innerHTML = '<div class="hint">加载中…</div>';
+  try {
+    const r = await api('/api/sessions/' + id);
+    if (S.sel !== id) return;            // 期间又切换了会话，丢弃过期响应
+    S.detail = r.session;
+    S.chunks = (r.session.chunks || []).map(c => ({...c, bytes: b64ToBytes(c.b64)}));
+    $('#btnKill').disabled = !['connecting', 'streaming'].includes(r.session.state);
+    renderDetail();
+  } catch (err) {
+    if (S.sel === id) $('#detail').innerHTML = `<div class="hint">加载失败: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderDetail() {
+  const s = S.detail;
+  if (!s) { $('#detail').innerHTML = '<div class="hint">从中间列表选择一个会话</div>'; return; }
+  $('#dTitle').textContent = `${s.method} ${s.path || '/'}  #${s.short_id}`;
+  $('#dMeta').textContent = `${s.state} · ${s.status ?? '-'} · ${fmtB(s.bytes_upstream)} · ${s.chunks}块 · TTFB ${s.ttfb_ms ?? '-'}ms · ${s.upstream_name || ''}`;
+  $('#cntChunk').textContent = S.chunks.length ? '(' + S.chunks.length + ')' : '';
+  const ce = $('#cntErr');
+  ce.textContent = s.errors.length;
+  ce.hidden = !s.errors.length;
+  if (S.tab === 'ov') renderOverview(s);
+  else if (S.tab === 'req') renderHeaders(s, 'request_headers', '请求体', s.request_body);
+  else if (S.tab === 'res') renderHeaders(s, 'response_headers', null, null);
+  else if (S.tab === 'rw') renderRewrite(s);
+  else if (S.tab === 'err') renderErrors(s);
+  else ensureStreamView();
+}
+
+/* --- 概览 --- */
+function renderOverview(s) {
+  const a = s.sse_analysis || {};
+  const tags = [];
+  const add = (k, v, bad) => {
+    if (v !== undefined && v !== null && v !== '') tags.push(`<span class="tag ${bad ? 'bad' : ''}">${k}: ${esc(v)}</span>`);
+  };
+  add('采样', fmtB(a.sampled_bytes)); add('CRLF', a.crlf_count); add('LF', a.bare_lf_count);
+  add('CR', a.bare_cr_count, a.bare_cr_count > 0);
+  add('空行分隔', a.blank_line_separators, a.blank_line_separators === 0);
+  add('data:', a.data_lines, a.data_lines === 0); add('event:', a.event_lines);
+  add('id:', a.id_lines); add('retry:', a.retry_lines); add('注释行', a.comment_lines);
+  add('非字段行', a.non_field_lines, a.non_field_lines > 0); add('疑似JSON行', a.json_like_lines);
+  const rows = [
+    ['会话 ID', s.id], ['状态', s.state], ['关闭原因', s.close_reason || '-'], ['客户端', s.client],
+    ['方法/路径', s.method + ' ' + (s.path || '/') + (s.query ? '?' + s.query : '')],
+    ['上游', s.upstream_name], ['实际请求的上游地址', s.target_url],
+    ['响应状态', `${s.status ?? '-'} ${s.http_version || ''}`],
+    ['首字节耗时', s.ttfb_ms != null ? s.ttfb_ms.toFixed(2) + ' ms' : '-'],
+    ['持续时间', (s.duration_ms / 1000).toFixed(3) + ' s'],
+    ['上游→客户端字节', fmtB(s.bytes_upstream)], ['分片数', s.chunks],
+    ['抓取字节', fmtB(s.captured_bytes)], ['因超限丢弃分片', s.drop_count],
+    ['开始', s.created_at_text], ['结束', s.closed_at_text || '-'], ['错误数', s.errors.length],
+  ];
+  $('#detail').innerHTML = `
+    <div class="analysis"><b>非标 SSE 探测</b>
+      ${a.nonstandard && a.nonstandard.length
+        ? `<div style="color:var(--warn);margin:4px 0">⚠ ${a.nonstandard.map(esc).join('； ')}</div>`
+        : '<div style="color:var(--ok);margin:4px 0">✔ 未发现明显的非标准特征（仅基于已采样内容判断）</div>'}
+      <div class="row">${tags.join('')}</div>
+      <div style="color:var(--faint);margin-top:6px">说明：转发器不解析 SSE，以上仅为观察结论，不影响任何转发字节。</div>
+    </div>
+    <table class="kv">${rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>`;
+}
+
+/* --- 请求/响应头 --- */
+function renderHeaders(s, key, bodyTitle, body) {
+  const hs = s[key] || [];
+  const rows = hs.map(h => `<tr><td>${esc(h.k)}</td><td>${esc(h.v)}</td></tr>`).join('')
+    || '<tr><td colspan=2 style="color:var(--dim)">(无)</td></tr>';
+  let extra = '';
+  if (bodyTitle) {
+    const u = b64ToBytes(body?.b64 || '');
+    extra = `<h4 class="sec">${bodyTitle} (${fmtB(body?.size || 0)}${body?.truncated ? '，已截断' : ''})</h4>
+      <pre class="block">${esc(bytesToText(u)) || '<span style="color:var(--faint)">(空)</span>'}</pre>`;
+  }
+  $('#detail').innerHTML = `<table class="kv">${rows}</table>${extra}`;
+}
+
+/* --- 改写 --- */
+function rwTable(hits, title) {
+  if (!hits || !hits.length) return `<div class="hint" style="padding:8px 0">${title}：无命中</div>`;
+  return `<h4 class="sec">${title}（合计 ${hits.reduce((a, b) => a + (b.count || 0), 0)} 处）</h4>
+    <table class="rw-tbl"><tr><th>规则</th><th>位置</th><th>替换</th><th>次数</th></tr>
+    ${hits.map(h => `<tr><td>${esc(h.label || '-')}</td><td>${esc(h.in || (h.direction === 'request' ? '请求' : '响应'))}</td>
+      <td>${esc(h.src)} <span class="arrow">→</span> ${esc(h.dst)}</td><td class="n">${h.count}</td></tr>`).join('')}</table>`;
+}
+function renderRewrite(s) {
+  const rules = s.rewrite_rules || [];
+  const rb = s.request_body || {};
+  const raw = b64ToBytes(rb.raw_b64 || ''), out = b64ToBytes(rb.b64 || '');
+  $('#detail').innerHTML = `
+    <div class="analysis"><b>本会话使用的规则快照</b>
+      ${rules.length ? `<table class="rw-tbl" style="margin-top:6px">
+        <tr><th>名称</th><th>本地值</th><th></th><th>上游值</th><th>方向</th><th>启用</th></tr>
+        ${rules.map(r => `<tr><td>${esc(r.label || '-')}</td><td>${esc(r.src)}</td>
+          <td class="arrow">⇄</td><td>${esc(r.dst)}</td>
+          <td>${r.scope === 'both' ? '双向' : (r.scope === 'request' ? '仅请求' : '仅响应')}</td>
+          <td>${r.enabled === false ? '否' : '是'}</td></tr>`).join('')}</table>`
+      : '<div style="color:var(--dim);margin-top:4px">该上游没有配置改写规则（或 REWRITE_ENABLED=false），请求与响应均按原始字节透传。</div>'}
+    </div>
+    ${rwTable(s.request_rewrites, '请求方向（客户端 → 上游）')}
+    ${rwTable(s.response_rewrites, '响应方向（上游 → 客户端，已反向替换）')}
+    ${raw.length ? `<h4 class="sec">请求体对照</h4>
+      <div class="grid2">
+        <div><div style="color:var(--dim);font-size:11px;margin-bottom:3px">客户端原始 (${fmtB(rb.raw_size)})</div>
+          <pre class="block" style="max-height:280px">${esc(bytesToText(raw))}</pre></div>
+        <div><div style="color:var(--dim);font-size:11px;margin-bottom:3px">实际发给上游 (${fmtB(rb.size)})</div>
+          <pre class="block" style="max-height:280px;border-color:#1f6f3a">${esc(bytesToText(out))}</pre></div>
+      </div>` : ''}
+    <div style="color:var(--faint);font-size:11px;margin-top:10px">
+      数据流页签里，发生过改写的分片右上角有「上游原文」开关，可逐块对照替换前后的字节。</div>`;
+}
+
+/* --- 错误 --- */
+function renderErrors(s) {
+  if (!s.errors.length) {
+    $('#detail').innerHTML = '<div class="hint" style="color:var(--ok)">该会话没有记录到任何错误</div>';
+    return;
+  }
+  $('#detail').innerHTML = s.errors.map(e => `<div class="errbox ${e.fatal ? '' : 'nonfatal'}">
+    <div class="t">${e.fatal ? '致命错误' : '警告'} · ${esc(e.type)}
+      <span style="color:var(--dim);font-weight:400">phase=${esc(e.phase)}</span></div>
+    <div class="msg">${esc(e.message)}</div>
+    <div class="meta"><span>${esc(e.ts_text || '')}</span>
+      ${e.detail && e.detail.target_url ? `<span>${esc(e.detail.target_url)}</span>` : ''}</div>
+    ${e.detail && Object.keys(e.detail).length ? `<details>
+      <summary>详细信息 (${Object.keys(e.detail).length} 项)</summary>
+      <pre>${esc(JSON.stringify(e.detail, null, 2))}</pre></details>` : ''}
+    ${e.traceback ? `<details><summary>Python 堆栈</summary><pre>${esc(e.traceback)}</pre></details>` : ''}
+  </div>`).reverse().join('');
+}
+
+/* --- 数据流（增量渲染） --- */
+function ensureStreamView() {
+  const root = S.streamRoot;
+  if (root && root.isConnected && root.dataset.sid === S.sel) return;
+  const el = document.createElement('div');
+  el.dataset.sid = S.sel;
+  S.streamRoot = el;
+  $('#detail').replaceChildren(el);
+  rebuildStream();
+}
+function chunkNode(c) {
+  const hex = $('#ckHex').checked;
+  const src = c.src_b64 ? b64ToBytes(c.src_b64) : null;
+  const d = document.createElement('div');
+  d.className = 'chunk ' + (hex ? 'hex ' : '') + (src ? 'rw' : '');
+  d.dataset.ci = c.seq;
+  d.innerHTML = `<div class="ch">
+      <span>#<b class="seq">${c.seq}${c.to && c.to !== c.seq ? '–' + c.to : ''}</b></span>
+      <span>${esc(c.ts_text || '')}</span><span>Δ<b class="delta">${c.delta_ms}</b>ms</span>
+      <span><b class="size">${fmtB(c.size)}</b></span>
+      ${c.truncated ? '<span style="color:var(--warn)">已截断</span>' : ''}
+      ${src ? '<span style="color:var(--warn)">已改写</span><span class="tog" data-tog="1">上游原文</span>' : ''}
+    </div><pre class="out">${esc(hex ? bytesToHex(c.bytes) : bytesToText(c.bytes))}</pre>
+    ${src ? `<pre class="srcv" hidden>${esc(hex ? bytesToHex(src) : bytesToText(src))}</pre>` : ''}`;
+  return d;
+}
+function rebuildStream() {
+  const el = S.streamRoot;
+  if (!el || !el.isConnected) return;
+  if (!S.chunks.length) {
+    el.innerHTML = '<div class="hint">还没有收到任何数据分片</div>';
+    return;
+  }
+  el.replaceChildren(...mergedChunks().map(chunkNode));
+  if ($('#ckAuto').checked) el.lastElementChild?.scrollIntoView();
+}
+function mergeable(a, b) {
+  return $('#ckMerge').checked && a && b && !a.truncated && !b.truncated
+    && !a.src_b64 && !b.src_b64 && b.delta_ms < 40 && a.bytes.length + b.bytes.length < 65536;
+}
+function mergedChunks() {
+  if (!$('#ckMerge').checked) return S.chunks;
+  const out = [];
+  let buf = null;
+  for (const c of S.chunks) {
+    if (mergeable(buf, c)) {
+      const n = new Uint8Array(buf.bytes.length + c.bytes.length);
+      n.set(buf.bytes); n.set(c.bytes, buf.bytes.length);
+      buf.bytes = n; buf.size += c.size; buf.to = c.seq; buf.delta_ms = c.delta_ms;
+    } else {
+      if (buf) out.push(buf);
+      buf = {...c, to: c.seq};
+    }
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+/** 新分片到达：只追加/合并一个 DOM 节点，不重渲染整个页签。 */
+function appendChunkDOM(c) {
+  const el = S.streamRoot;
+  if (!el || !el.isConnected) return;
+  if (el.firstElementChild?.classList.contains('hint')) el.replaceChildren();
+  let node = null;
+  const last = el.lastElementChild;
+  if (mergeable(S.chunks[S.chunks.length - 2], c)) {
+    // 与上一块合并：直接更新最后一个节点的文本与元信息
+    const merged = mergedChunks().pop();
+    if (last && last.classList.contains('chunk')) {
+      last.querySelector('.seq').textContent =
+        `${merged.seq}${merged.to !== merged.seq ? '–' + merged.to : ''}`;
+      last.querySelector('.delta').textContent = merged.delta_ms;
+      last.querySelector('.size').textContent = fmtB(merged.size);
+      last.querySelector('.out').textContent = $('#ckHex').checked
+        ? bytesToHex(merged.bytes) : bytesToText(merged.bytes);
+      node = last;
+    }
+  }
+  if (!node) { node = chunkNode(c); el.appendChild(node); }
+  while (el.children.length > CHUNK_CAP) el.firstElementChild.remove();
+  if ($('#ckAuto').checked && $('#detail').scrollTop + $('#detail').clientHeight
+      >= $('#detail').scrollHeight - 80) {
+    node.scrollIntoView({block: 'end'});
+  }
+}
+/* 上游原文/客户端收到 切换（事件委托，只绑定一次） */
+$('#detail').addEventListener('click', e => {
+  const t = e.target.closest('[data-tog]');
+  if (!t) return;
+  const box = t.closest('.chunk');
+  const a = box?.querySelector('.out'), b = box?.querySelector('.srcv');
+  if (!b) return;
+  const show = b.hidden;
+  b.hidden = !show; a.hidden = show;
+  t.textContent = show ? '客户端收到' : '上游原文';
+  t.style.color = show ? 'var(--warn)' : 'var(--acc)';
+});
+$('#ckHex').onchange = rebuildStream;
+$('#ckMerge').onchange = rebuildStream;
+$('#ckPause').onchange = e => {
+  S.paused = e.target.checked;
+  toast(S.paused ? '已暂停渲染（后台仍在记录）' : '恢复渲染');
+  if (!S.paused && S.tab === 'stream') rebuildStream();
+};
+
+/* ---------------- SSE 实时连接 ---------------- */
+function connect() {
+  if (S.es) S.es.close();
+  const url = '/api/events' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+  const es = new EventSource(url);
+  S.es = es;
+  const setConn = (t, cls) => {
+    $('#hConn').className = 'pill ' + cls;
+    $('#hConn').innerHTML = '实时流 <b>' + t + '</b>';
+  };
+  es.onopen = () => setConn('已连接', 'ok');
+  es.onerror = () => setConn('断开，重连中…', 'err');
+
+  es.addEventListener('snapshot', e => {
+    const d = JSON.parse(e.data).data;
+    (d.sessions || []).forEach(putSession);
+    S.upstreams = d.upstreams || [];
+    S.active = d.active_upstream_id;
+    S.stats = d.stats || {};
+    renderUps(); renderSess(); setConn('已连接', 'ok');
+  });
+
+  es.addEventListener('chunk', e => {
+    const c = JSON.parse(e.data);
+    const s = S.sessions.get(c.session_id);
+    if (s) {
+      s.bytes_upstream = c.bytes_upstream;
+      s.chunks = (s.chunks || 0) + 1;
+      s.state = c.state;
+      bumpOrder(c.session_id);
+    }
+    if (c.session_id === S.sel) {
+      S.chunks.push({...c, bytes: b64ToBytes(c.b64)});
+      if (S.chunks.length > CHUNK_CAP) S.chunks.splice(0, S.chunks.length - CHUNK_CAP);
+      if (S.detail) {
+        S.detail.bytes_upstream = c.bytes_upstream;
+        S.detail.chunks = (S.detail.chunks || 0) + 1;
+        $('#dMeta').textContent = `${S.detail.state} · ${S.detail.status ?? '-'} · ${fmtB(c.bytes_upstream)} · ${S.detail.chunks}块 · TTFB ${S.detail.ttfb_ms ?? '-'}ms · ${S.detail.upstream_name || ''}`;
+        $('#cntChunk').textContent = S.chunks.length ? '(' + S.chunks.length + ')' : '';
+      }
+      if (S.tab === 'stream' && !S.paused) appendChunkDOM(c);
+    }
+    patchSessRow(c.session_id);
+  });
+
+  const onSummary = created => e => {
+    const d = JSON.parse(e.data);
+    if (created) {
+      putSession(d);
+      if (!S.sel) selectSession(d.id, true);
+    } else {
+      const s = S.sessions.get(d.id);
+      if (s) Object.assign(s, d);
+      if (S.sel === d.id && S.detail) Object.assign(S.detail, d);
+    }
+    patchSessRow(d.id);
+    if (S.sel === d.id) renderDetail();
+  };
+  es.addEventListener('session_created', onSummary(true));
+  es.addEventListener('session_closed', onSummary(false));
+
+  es.addEventListener('request_sending', e => {
+    const d = JSON.parse(e.data);
+    if (S.sel === d.session_id && S.detail) { S.detail.request_headers = d.headers; renderDetail(); }
+  });
+  es.addEventListener('response_headers', e => {
+    const d = JSON.parse(e.data);
+    const s = S.sessions.get(d.session_id);
+    if (s) { s.status = d.status; s.state = 'streaming'; }
+    if (S.sel === d.session_id && S.detail) {
+      Object.assign(S.detail, {status: d.status, response_headers: d.headers,
+                               http_version: d.http_version, ttfb_ms: d.ttfb_ms});
+      renderDetail();
+    } else patchSessRow(d.session_id);
+  });
+
+  es.addEventListener('error', e => {
+    const d = JSON.parse(e.data);
+    const s = d.session_id ? S.sessions.get(d.session_id) : null;
+    if (s) {
+      s.errors = (s.errors || 0) + 1;
+      if (d.fatal) s.state = 'error';
+    }
+    if (S.detail && S.detail.id === d.session_id) {
+      S.detail.errors = (S.detail.errors || []).concat([d]);
+      const ce = $('#cntErr');
+      ce.textContent = S.detail.errors.length;
+      ce.hidden = !S.detail.errors.length;
+    }
+    $('#hErr').textContent = (parseInt($('#hErr').textContent || '0', 10) + 1);
+    $('#hErrPill').hidden = false;
+    toast(`[${d.phase}] ${d.type}: ${d.message}`.slice(0, 300), 'err');
+    patchSessRow(d.session_id);
+  });
+
+  ['upstream_switched', 'upstream_created', 'upstream_updated', 'upstream_removed']
+    .forEach(k => es.addEventListener(k, () => { loadState().catch(() => {}); }));
+
+  es.addEventListener('request_rewritten', e => {
+    const d = JSON.parse(e.data);
+    const n = d.rewrites.reduce((a, b) => a + b.count, 0);
+    toast(`会话 #${d.session_short_id} 请求已改写 ${n} 处（body ${d.body_size_before}→${d.body_size_after} 字节）`);
+    if (S.sel === d.session_id) selectSession(d.session_id, true);
+  });
+  es.addEventListener('response_rewritten', e => {
+    const d = JSON.parse(e.data);
+    const n = d.rewrites.reduce((a, b) => a + b.count, 0);
+    toast(`会话 #${d.session_short_id} 响应已反向改写 ${n} 处`, 'ok');
+    if (S.sel === d.session_id) selectSession(d.session_id, true);
+  });
+  es.addEventListener('history_cleared', () => { S.sessions.clear(); S.order = []; renderSess(); });
+}
+function putSession(s) {
+  S.sessions.set(s.id, s);
+  if (!S.order.includes(s.id)) S.order.push(s.id);
+}
+function bumpOrder(id) {
+  const i = S.order.indexOf(id);
+  if (i >= 0 && i < S.order.length - 1) {
+    S.order.splice(i, 1);
+    S.order.push(id);
+  }
+}
+
+/* ---------------- 初始化 ---------------- */
+setInterval(() => { if (!S.paused) loadState().catch(() => {}); }, 15000);
+loadState()
+  .then(() => api('/api/sessions?limit=100'))
+  .then(r => { (r.sessions || []).forEach(putSession); renderSess(); })
+  .then(connect)
+  .catch(e => toast('初始化失败: ' + e.message, 'err', 15000));
+</script>
+</body>
+</html>

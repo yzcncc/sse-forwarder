@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable, Optional, Sequence
 
 Pair = tuple[bytes, bytes, str]     # (查找, 替换为, 规则名)
@@ -29,12 +29,12 @@ class Rule:
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "Rule":
+        scope = str(d.get("scope") or "both").lower()
         return Rule(
             src=str(d.get("src") or d.get("from") or d.get("local") or ""),
             dst=str(d.get("dst") or d.get("to") or d.get("upstream") or ""),
             label=str(d.get("label") or ""),
-            scope=(str(d.get("scope") or "both").lower()
-                   if str(d.get("scope") or "both").lower() in VALID_SCOPES else "both"),
+            scope=scope if scope in VALID_SCOPES else "both",
             enabled=bool(d.get("enabled", True)),
         )
 

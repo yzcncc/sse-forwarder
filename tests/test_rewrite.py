@@ -18,7 +18,7 @@ def ok(name, cond, extra=""):
 
 
 def run():
-    from app.rewrite import Rule, RuleSet, StreamRewriter   # noqa: F401  故意后置导入，未实现时直接报错
+    from app.core.rewrite import Rule, RuleSet, StreamRewriter   # noqa: F401  故意后置导入，未实现时直接报错
 
     LOCAL_KEY = "sk-local-aaaa1111bbbb2222cccc3333dddd4444"
     UP_KEY = "sk-upstream-zzzz9999yyyy8888xxxx7777wwww6666"

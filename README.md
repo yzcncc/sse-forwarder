@@ -220,6 +220,32 @@ GET    /__proxy_health__                 代理端口侧的健康检查
 | `REWRITE_MAX_BODY` | `8388608` | 请求体超过此大小则跳过 body 改写（头照常改写）并告警 |
 | `LOG_LEVEL` | `info` | |
 
+## 代码结构
+
+```
+app/
+├── config.py              # 全部环境变量配置（Settings）
+├── main.py                # 入口与装配（create_apps / serve）
+├── core/                  # 领域层（不依赖 Starlette/httpx）
+│   ├── models.py          #   上游/会话/分片/错误 + 序列化
+│   ├── storage.py         #   Store：上游管理、会话存储、事件、持久化
+│   ├── events.py          #   发布订阅事件总线 + 回放缓冲
+│   ├── analysis.py        #   非标 SSE 探测（只观察不改动）
+│   └── rewrite.py         #   字面替换规则 + 流式滑动窗口改写
+├── http/transport.py      # httpx 连接池、请求/响应头过滤、URL 拼接、在线解压
+├── proxy/                 # 代理应用
+│   ├── app.py             #   请求处理管线
+│   ├── errors.py          #   异常 → phase/closed_reason 分类表
+│   └── forward.py         #   流转发（读/取消/空闲超时赛跑 + 尾巴冲刷）
+└── dashboard/             # Dashboard 应用
+    ├── app.py             #   全部 API 路由 + SSE 事件流
+    ├── probe.py           #   DNS→TCP→TLS→HTTP 逐层探测
+    ├── validation.py      #   url/规则校验
+    └── static/index.html  #   前端（单文件，零依赖）
+```
+
+重构前的全部对外行为基线见 [DOCS_FUNCTIONS.md](DOCS_FUNCTIONS.md)。
+
 ## 并发模型
 
 单进程单事件循环 + 两个 uvicorn Server（代理、Dashboard 各一个端口）。

@@ -1,18 +1,20 @@
-"""入口：一个进程内同时跑「代理端口」和「Dashboard 端口」。"""
+"""入口：一个进程内同时跑「代理端口」和「Dashboard 端口」。
+
+装配顺序：Settings ← Store(含持久化与种子上游) ← ClientPool ← 两个 Starlette 应用。
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import signal
-import sys
 
 import uvicorn
 
 from .config import Settings
-from .dashboard_api import make_dashboard_app
-from .proxy import ClientPool, make_proxy_app
-from .store import Store
+from .dashboard import make_dashboard_app
+from .http import ClientPool
+from .proxy import make_proxy_app
+from .core.storage import Store
 
 
 def build(settings: Settings | None = None) -> tuple[Store, Settings, ClientPool]:
@@ -36,12 +38,30 @@ def create_apps(settings: Settings | None = None):
     return proxy_app, dash_app, store, settings, pool
 
 
+def _print_banner(settings: Settings, store: Store) -> None:
+    active = store.get_active()
+    rules = active.rules if active else []
+    print("=" * 78, flush=True)
+    print(" SSE 原始流转发器已启动", flush=True)
+    print(f"   代理端口    : http://{settings.proxy_host}:{settings.proxy_port}  (把请求打到这里，会原样转发到上游)", flush=True)
+    print(f"   Dashboard   : http://{settings.dashboard_host}:{settings.dashboard_port}", flush=True)
+    print(f"   当前上游    : {active.name + ' → ' + active.url if active else '(未配置，请在 Dashboard 添加)'}", flush=True)
+    print(f"   明文抓取    : force_identity_encoding={settings.force_identity_encoding}"
+          f" (false 时 100% 字节透传，可能是压缩流)", flush=True)
+    print(f"   改写规则    : {'关闭' if not settings.rewrite_enabled else (str(len(rules)) + ' 条（跟随上游）' if rules else '当前上游未配置')}", flush=True)
+    for r in rules:
+        print(f"     - {r.get('label') or '(未命名)'}: {r['src']} -> {r['dst']}  [{r.get('scope', 'both')}]", flush=True)
+    print(f"   读超时      : {settings.read_timeout or '不限（SSE 长连接）'}   空闲超时: {settings.idle_timeout or '关闭'}", flush=True)
+    print("=" * 78, flush=True)
+
+
 async def serve(settings: Settings | None = None) -> None:
     proxy_app, dash_app, store, settings, pool = create_apps(settings)
 
     level = settings.log_level.lower()
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    _print_banner(settings, store)
 
     proxy_cfg = uvicorn.Config(proxy_app, host=settings.proxy_host, port=settings.proxy_port,
                                log_level=level, access_log=False, server_header=False,
@@ -51,21 +71,6 @@ async def serve(settings: Settings | None = None) -> None:
                               timeout_graceful_shutdown=5)
     proxy_srv = uvicorn.Server(proxy_cfg)
     dash_srv = uvicorn.Server(dash_cfg)
-
-    active = store.get_active()
-    print("=" * 78, flush=True)
-    print(" SSE 原始流转发器已启动", flush=True)
-    print(f"   代理端口    : http://{settings.proxy_host}:{settings.proxy_port}  (把请求打到这里，会原样转发到上游)", flush=True)
-    print(f"   Dashboard   : http://{settings.dashboard_host}:{settings.dashboard_port}", flush=True)
-    print(f"   当前上游    : {active.name + ' → ' + active.url if active else '(未配置，请在 Dashboard 添加)'}", flush=True)
-    print(f"   明文抓取    : force_identity_encoding={settings.force_identity_encoding}"
-          f" (false 时 100% 字节透传，可能是压缩流)", flush=True)
-    rules = active.rules if active else []
-    print(f"   改写规则    : {'关闭' if not settings.rewrite_enabled else (str(len(rules)) + ' 条（跟随上游）' if rules else '当前上游未配置')}", flush=True)
-    for r in rules:
-        print(f"     - {r.get('label') or '(未命名)'}: {r['src']} -> {r['dst']}  [{r.get('scope', 'both')}]", flush=True)
-    print(f"   读超时      : {settings.read_timeout or '不限（SSE 长连接）'}   空闲超时: {settings.idle_timeout or '关闭'}", flush=True)
-    print("=" * 78, flush=True)
 
     stop = asyncio.Event()
 
