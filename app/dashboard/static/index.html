@@ -976,7 +976,7 @@ function connect() {
   });
 
   es.addEventListener('chunk', e => {
-    const c = JSON.parse(e.data);
+    const c = JSON.parse(e.data).data;
     const s = S.sessions.get(c.session_id);
     if (s) {
       s.bytes_upstream = c.bytes_upstream;
@@ -999,7 +999,7 @@ function connect() {
   });
 
   const onSummary = created => e => {
-    const d = JSON.parse(e.data);
+    const d = JSON.parse(e.data).data;
     if (created) {
       putSession(d);
       if (!S.sel) selectSession(d.id, true);
@@ -1015,11 +1015,11 @@ function connect() {
   es.addEventListener('session_closed', onSummary(false));
 
   es.addEventListener('request_sending', e => {
-    const d = JSON.parse(e.data);
+    const d = JSON.parse(e.data).data;
     if (S.sel === d.session_id && S.detail) { S.detail.request_headers = d.headers; renderDetail(); }
   });
   es.addEventListener('response_headers', e => {
-    const d = JSON.parse(e.data);
+    const d = JSON.parse(e.data).data;
     const s = S.sessions.get(d.session_id);
     if (s) { s.status = d.status; s.state = 'streaming'; }
     if (S.sel === d.session_id && S.detail) {
@@ -1030,7 +1030,7 @@ function connect() {
   });
 
   es.addEventListener('error', e => {
-    const d = JSON.parse(e.data);
+    const d = JSON.parse(e.data).data;
     const s = d.session_id ? S.sessions.get(d.session_id) : null;
     if (s) {
       s.errors = (s.errors || 0) + 1;
@@ -1052,13 +1052,13 @@ function connect() {
     .forEach(k => es.addEventListener(k, () => { loadState().catch(() => {}); }));
 
   es.addEventListener('request_rewritten', e => {
-    const d = JSON.parse(e.data);
+    const d = JSON.parse(e.data).data;
     const n = d.rewrites.reduce((a, b) => a + b.count, 0);
     toast(`会话 #${d.session_short_id} 请求已改写 ${n} 处（body ${d.body_size_before}→${d.body_size_after} 字节）`);
     if (S.sel === d.session_id) selectSession(d.session_id, true);
   });
   es.addEventListener('response_rewritten', e => {
-    const d = JSON.parse(e.data);
+    const d = JSON.parse(e.data).data;
     const n = d.rewrites.reduce((a, b) => a + b.count, 0);
     toast(`会话 #${d.session_short_id} 响应已反向改写 ${n} 处`, 'ok');
     if (S.sel === d.session_id) selectSession(d.session_id, true);
