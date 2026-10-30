@@ -645,14 +645,16 @@ function renderSess() {
 }
 function sessRowHTML(s) {
   if (!s) return '';
+  const method = s.method || '-';
   const sc = s.status ? (s.status >= 400 ? 'bad' : '') : '';
   const live = ['connecting', 'streaming'].includes(s.state);
+  const dur = typeof s.duration_ms === 'number' ? (s.duration_ms / 1000).toFixed(1) + 's' : '-';
   return `<div class="sess ${S.sel === s.id ? 'sel' : ''}" data-id="${esc(s.id)}">
-    <div class="l1"><span class="st ${esc(s.state)}"></span><span class="m ${esc(s.method)}">${esc(s.method)}</span>
+    <div class="l1"><span class="st ${esc(s.state)}"></span><span class="m ${esc(method)}">${esc(method)}</span>
       <span class="p">${esc(s.path || '/')}</span><span class="sc ${sc}">${esc(s.status ?? '…')}</span></div>
     <div class="l2"><span>#${esc(s.short_id)}</span><span>${esc(s.upstream_name || '')}</span>
-      <span>${fmtB(s.bytes_upstream)}</span><span>${s.chunks}块</span>
-      <span>${(s.duration_ms / 1000).toFixed(1)}s</span>
+      <span>${fmtB(s.bytes_upstream)}</span><span>${s.chunks ?? 0}块</span>
+      <span>${dur}</span>
       ${s.errors > 0 ? `<span style="color:var(--err)">⚠${s.errors}</span>` : ''}
       ${!live ? `<span>${esc(s.close_reason || s.state)}</span>` : ''}</div>
   </div>`;
@@ -664,6 +666,7 @@ function updateHeaderCounts() {
 }
 /** 轻量补丁：只更新单行，避免每个分片全量重绘列表。 */
 function patchSessRow(id) {
+  if (!id) return;                 // config 类错误等无会话事件，无可更新行
   const row = $(`#sessList .sess[data-id="${CSS.escape(id)}"]`);
   if (!row) { renderSess(); return; }
   const onlyOpenOk = !S.onlyOpen || ['connecting', 'streaming'].includes(S.sessions.get(id)?.state);
@@ -762,7 +765,7 @@ function renderOverview(s) {
     ['上游', s.upstream_name], ['实际请求的上游地址', s.target_url],
     ['响应状态', `${s.status ?? '-'} ${s.http_version || ''}`],
     ['首字节耗时', s.ttfb_ms != null ? s.ttfb_ms.toFixed(2) + ' ms' : '-'],
-    ['持续时间', (s.duration_ms / 1000).toFixed(3) + ' s'],
+    ['持续时间', typeof s.duration_ms === 'number' ? (s.duration_ms / 1000).toFixed(3) + ' s' : '-'],
     ['上游→客户端字节', fmtB(s.bytes_upstream)], ['分片数', s.chunks],
     ['抓取字节', fmtB(s.captured_bytes)], ['因超限丢弃分片', s.drop_count],
     ['开始', s.created_at_text], ['结束', s.closed_at_text || '-'], ['错误数', s.errors.length],
